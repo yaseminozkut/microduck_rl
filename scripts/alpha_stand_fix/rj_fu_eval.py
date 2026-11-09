@@ -10,8 +10,12 @@ Classifier: at any tick with t_s >= 11.0, recovered iff
     trunk_z > 0.095 AND gravity_z < -0.9 .
 
 Usage:
-    uv run python claude_experiments/alpha_stand_fix/rj_fu_eval.py \
-        <checkpoint.pt> --out <log.pt>
+    uv run python scripts/alpha_stand_fix/rj_fu_eval.py \
+        <checkpoint> --out <log.pt> [--device cuda] [--num-envs 256]
+
+``<checkpoint>`` is either a local .pt path or an ``hf://`` spec (the bundle
+directory or the model file inside it); it is resolved through
+``mjlab_microduck.checkpoints.resolve``.
 """
 from __future__ import annotations
 
@@ -71,10 +75,22 @@ def make_rj_fu_env_cfg(seed: int, num_envs: int, duration_s: float):
     return env_cfg
 
 
-def run_policy(checkpoint: Path, seed: int = 42, num_envs: int = 256,
+def resolve_checkpoint(spec: str) -> Path:
+    """Local file path, or ``hf://<repo>/<path>`` → resolved via the
+    microduck_rl checkpoints helper (supports both the bundle dir and the
+    direct .pt file inside it)."""
+    if spec.startswith("hf://"):
+        from mjlab_microduck.checkpoints import resolve
+        return resolve(spec)
+    return Path(spec)
+
+
+def run_policy(checkpoint: str | Path, seed: int = 42, num_envs: int = 256,
                duration_s: float = 13.0, device: str = "cpu") -> dict:
     """Roll out ``checkpoint`` from rj_fu starts and record per-tick physics."""
     configure_torch_backends()
+    checkpoint = resolve_checkpoint(str(checkpoint))
+    print(f"Resolved checkpoint → {checkpoint}")
     env_cfg = make_rj_fu_env_cfg(seed=seed, num_envs=num_envs, duration_s=duration_s)
     agent_cfg = load_rl_cfg(TASK_ID)
 
@@ -160,7 +176,8 @@ def run_policy(checkpoint: Path, seed: int = 42, num_envs: int = 256,
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("checkpoint", type=Path)
+    ap.add_argument("checkpoint", type=str,
+                    help="Local .pt path or hf://... bundle/file spec.")
     ap.add_argument("--out",      type=Path, required=True)
     ap.add_argument("--seed",     type=int, default=42)
     ap.add_argument("--num-envs", type=int, default=256)

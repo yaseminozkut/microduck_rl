@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import argparse
 import math
+import sys
+import time
 from dataclasses import asdict
 from pathlib import Path
 
@@ -128,6 +130,9 @@ def run_policy(checkpoint: str | Path, seed: int = 42, num_envs: int = 256,
     def _flat(td):
         return torch.cat([td[g] for g in obs_groups], dim=-1)
 
+    t_start = time.monotonic()
+    print(f"Rolling out: {num_envs} envs × {n_steps} ticks "
+          f"({n_steps * dt:.1f} s sim) on {device} …", flush=True)
     for step in range(n_steps):
         trunk_z_hist[step]   = robot.data.root_link_pos_w[:, 2].cpu()
         pg = robot.data.projected_gravity_b
@@ -142,6 +147,20 @@ def run_policy(checkpoint: str | Path, seed: int = 42, num_envs: int = 256,
         obs_hist[step]    = _flat(actor_obs_cur).cpu()
 
         actor_obs_cur, _, _, _ = env.step(actions)
+
+        if step % 25 == 0 or step == n_steps - 1:
+            frac_up_now = ((trunk_z_hist[step] > 0.095)
+                           & (grav_z_hist[step] < -0.9)).float().mean().item()
+            elapsed = time.monotonic() - t_start
+            rate = (step + 1) / max(elapsed, 1e-6)
+            eta = (n_steps - step - 1) / max(rate, 1e-6)
+            sys.stdout.write(
+                f"\r  step {step+1:4d}/{n_steps}  t_sim={step*dt:5.2f}s  "
+                f"frac_upright_now={100*frac_up_now:5.1f}%  "
+                f"{rate:5.1f} tick/s  ETA {eta:5.1f}s   "
+            )
+            sys.stdout.flush()
+    print()
 
     # Classify.
     t_axis = torch.arange(n_steps) * dt
